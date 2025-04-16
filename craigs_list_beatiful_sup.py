@@ -1,6 +1,7 @@
 import requests
 from bs4 import BeautifulSoup
 from typing import Optional
+from csv_extraction import update_listings_csv
 
 def build_craigslist_url(
     city: str = 'vancouver',
@@ -112,4 +113,5 @@ if __name__ == "__main__":
     )
 
     for link in results:
+        update_listings_csv(link)
         print(link)

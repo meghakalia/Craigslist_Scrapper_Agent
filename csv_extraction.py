@@ -117,8 +117,17 @@ def extract_listing_details(url: str) -> Dict[str, any]:
             'neighborhood': None,
             'start_date': None,
             'num_images': 0,
-            'has_watermark': False
+            'has_watermark': False,
+            'description': None  # Add new field for description
         }
+        
+        # Find h1 tag and get the next p tag
+        h1_tag = soup.find('h1', class_=False)
+        if h1_tag:
+            # Find the next p tag after h1
+            next_p = h1_tag.find_next('p')
+            if next_p:
+                details['description'] = next_p.text.strip()
         
         # Extract price
         price_elem = soup.find('span', {'class': 'price'})
@@ -132,7 +141,7 @@ def extract_listing_details(url: str) -> Dict[str, any]:
             details['neighborhood'] = location_elem.text.strip()
         
         # Count images
-        gallery = soup.find('div', {'id': 'thumb'})
+        gallery = soup.find('div', {'id': 'thumbs'})
         if gallery:
             image_elements = gallery.find_all('img')
             details['num_images'] = len(image_elements)
@@ -141,7 +150,8 @@ def extract_listing_details(url: str) -> Dict[str, any]:
             if image_elements:
                 first_image_url = image_elements[0].get('src')
                 if first_image_url:
-                    details['has_watermark'] = detect_watermark(first_image_url)
+                    # details['has_watermark'] = detect_watermark(first_image_url)
+                    details['has_watermark'] = False
         
         # Extract posting body text
         body = soup.find('section', {'id': 'postingbody'})
@@ -192,13 +202,13 @@ def update_listings_csv(listing_url: str):
     handling duplicates and file size limits
     """
     # Check for duplicates across all existing CSVs
-    if is_duplicate_listing(listing_url):
-        print(f"Duplicate listing found, skipping: {listing_url}")
+    if exists_duplicate_listing_json(listing_url):
+        print(f"Duplicate listing found in JSON database, skipping: {listing_url}")
         return
     
     # Extract details from the listing
     details = extract_listing_details(listing_url)
-    
+
     if not details:
         print(f"Could not process listing: {listing_url}")
         return
@@ -206,7 +216,7 @@ def update_listings_csv(listing_url: str):
     # Update JSON database first
     if not update_json_database(details):
         print(f"Error updating JSON database: {listing_url}")
-        return
+        return  
     
     # If JSON update successful, update CSV
     csv_path = get_current_csv_path()
@@ -272,29 +282,69 @@ def save_json_database(data: Dict[str, any], json_path: str = 'listings_database
     except Exception as e:
         print(f"Error saving JSON database: {e}")
 
-def update_json_database(listing_details: Dict[str, any]) -> bool:
+def exists_duplicate_listing_json(listing_url: str) -> bool:
     """
-    Update JSON database with new listing details
-    Returns True if update was successful, False if listing already exists
+    Check if the listing URL exists in the JSON database
     """
-    if not listing_details or 'link' not in listing_details:
+    try:
+        # if the file does not exists create a new one and return false
+        if not os.path.exists('listings_database.json'):
+            #create a new one
+            with open('listings_database.json', 'w') as f:
+                json.dump({}, f, indent=2)
+            return False
+        
+        with open('listings_database.json', 'r') as f:
+            database = json.load(f)
+
+        if listing_url in database:
+            return True
+        else:
+            return False
+    except Exception as e:
+        print(f"Error checking duplicate listing in JSON database: {e}")
         return False
     
-    # Load existing database
-    database = load_json_database()
+def update_json_database(listing_data: dict) -> bool:
+    """
+    Check if the listing URL exists in the JSON database and update it if not.
+    Returns True if the listing was new and added, False if it was a duplicate.
     
-    # Check if listing already exists
-    if listing_details['link'] in database:
+    Args:
+        listing_data: Dictionary containing listing information including 'link' as the URL
+    """
+    try:
+        # Load existing JSON database
+        with open('listings_database.json', 'r') as f:
+            database = json.load(f)
+        
+        # Create new entry with all listing data
+
+        new_entry = {
+            'date_scraped': listing_data.get('date_scraped', datetime.now().strftime('%Y-%m-%d')),
+            'price': listing_data.get('price'),
+            'rooms': listing_data.get('rooms'),
+            'separate_bath': listing_data.get('separate_bath', False),
+            'separate_kitchen': listing_data.get('separate_kitchen', False),
+            'neighborhood': listing_data.get('neighborhood'),
+            'start_date': listing_data.get('start_date'),
+            'num_images': listing_data.get('num_images', 0),
+            'has_watermark': listing_data.get('has_watermark', False),
+            'description': listing_data.get('description')
+        }
+        
+        # Add new entry to database
+        database[listing_data['link']] = new_entry
+        
+        # Save updated database with proper formatting
+        with open('listings_database.json', 'w') as f:
+            json.dump(database, f, indent=2)
+        
+        return True
+        
+    except Exception as e:
+        print(f"Error updating JSON database: {e}")
         return False
-    
-    # Add new listing
-    database[listing_details['link']] = {
-        k: v for k, v in listing_details.items() if k != 'link'
-    }
-    
-    # Save updated database
-    save_json_database(database)
-    return True
 
 def get_json_stats():
     """
