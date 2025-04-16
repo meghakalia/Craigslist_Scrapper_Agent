@@ -106,7 +106,7 @@ def extract_listing_details(url: str) -> Dict[str, any]:
         response.raise_for_status()
         soup = BeautifulSoup(response.text, 'html.parser')
         
-        # Initialize details dictionary
+        # Initialize details dictionary with new fields
         details = {
             'date_scraped': datetime.now().strftime('%Y-%m-%d'),
             'link': url,
@@ -118,7 +118,12 @@ def extract_listing_details(url: str) -> Dict[str, any]:
             'start_date': None,
             'num_images': 0,
             'has_watermark': False,
-            'description': None  # Add new field for description
+            'description': None,
+            'housing_type': None,  # New field
+            'rent_period': None,   # New field
+            'amenities': [],       # New field
+            'furnished': False,    # New field
+            'parking': None        # New field
         }
         
         # Find h1 tag and get the next p tag
@@ -140,6 +145,46 @@ def extract_listing_details(url: str) -> Dict[str, any]:
         if location_elem:
             details['neighborhood'] = location_elem.text.strip()
         
+        # Extract attributes from the listing
+        attrgroups = soup.find_all('div', {'class': 'attrgroup'})
+        for attrgroup in attrgroups:
+            # spans = attrgroup.find_all('span', {'class': 'attr'})
+            spans = attrgroup.find_all('span', class_=['attr', 'valu'])
+
+            for span in spans:
+                print(span)
+                text = span.text.strip().lower()
+                if 'br' in text:
+                    try:
+                        details['rooms'] = int(text.split('br')[0].strip())
+                    except:
+                        pass
+                elif 'ba' in text:
+                    details['separate_bath'] = True
+                elif 'private bath' in text:
+                    details['separate_bath'] = True
+                elif 'private kitchen' in text or 'separate kitchen' in text:
+                    details['separate_kitchen'] = True
+                elif 'furnished' in text:
+                    details['furnished'] = True
+                elif 'laundry' in text:
+                    details['amenities'].append('laundry')
+                elif 'parking' in text:
+                    details['parking'] = text
+                elif 'available' in text:
+                    try:
+                        date_str = text.split('available')[1].strip()
+                        details['start_date'] = datetime.strptime(
+                            f"{date_str} {datetime.now().year}", 
+                            '%B %d %Y'
+                        ).strftime('%Y-%m-%d')
+                    except:
+                        pass
+                elif 'weekly' in text or 'monthly' in text:
+                    details['rent_period'] = text
+                elif text in ['apartment', 'house', 'condo', 'townhouse', 'duplex']:
+                    details['housing_type'] = text
+        
         # Count images
         gallery = soup.find('div', {'id': 'thumbs'})
         if gallery:
@@ -153,42 +198,43 @@ def extract_listing_details(url: str) -> Dict[str, any]:
                     # details['has_watermark'] = detect_watermark(first_image_url)
                     details['has_watermark'] = False
         
-        # Extract posting body text
+        # Extract posting body text for additional information
         body = soup.find('section', {'id': 'postingbody'})
         if body:
             body_text = body.text.lower()
             
             # Check for room details in description
-            details['separate_bath'] = any(term in body_text for term in ['private bath', 'own bath', 'separate bath'])
-            details['separate_kitchen'] = any(term in body_text for term in ['private kitchen', 'own kitchen', 'separate kitchen'])
+            details['separate_bath'] = details['separate_bath'] or any(term in body_text for term in ['private bath', 'own bath', 'separate bath'])
+            details['separate_kitchen'] = details['separate_kitchen'] or any(term in body_text for term in ['private kitchen', 'own kitchen', 'separate kitchen'])
             
-            # Try to extract number of rooms
-            room_patterns = [r'(\d+)\s*bed', r'(\d+)\s*room']
-            for pattern in room_patterns:
-                match = re.search(pattern, body_text)
-                if match:
-                    details['rooms'] = int(match.group(1))
-                    break
-            
-            # Try to extract start date
-            date_patterns = [
-                r'available\s+(\w+\s+\d{1,2})',
-                r'starting\s+(\w+\s+\d{1,2})',
-                r'from\s+(\w+\s+\d{1,2})'
-            ]
-            for pattern in date_patterns:
-                match = re.search(pattern, body_text)
-                if match:
-                    try:
-                        date_str = match.group(1)
-                        # Add current year since Craigslist listings typically don't include it
-                        details['start_date'] = datetime.strptime(
-                            f"{date_str} {datetime.now().year}", 
-                            '%B %d %Y'
-                        ).strftime('%Y-%m-%d')
+            # Try to extract number of rooms if not already found
+            if not details['rooms']:
+                room_patterns = [r'(\d+)\s*bed', r'(\d+)\s*room']
+                for pattern in room_patterns:
+                    match = re.search(pattern, body_text)
+                    if match:
+                        details['rooms'] = int(match.group(1))
                         break
-                    except ValueError:
-                        continue
+            
+            # Try to extract start date if not already found
+            if not details['start_date']:
+                date_patterns = [
+                    r'available\s+(\w+\s+\d{1,2})',
+                    r'starting\s+(\w+\s+\d{1,2})',
+                    r'from\s+(\w+\s+\d{1,2})'
+                ]
+                for pattern in date_patterns:
+                    match = re.search(pattern, body_text)
+                    if match:
+                        try:
+                            date_str = match.group(1)
+                            details['start_date'] = datetime.strptime(
+                                f"{date_str} {datetime.now().year}", 
+                                '%B %d %Y'
+                            ).strftime('%Y-%m-%d')
+                            break
+                        except ValueError:
+                            continue
         
         return details
     
@@ -319,7 +365,7 @@ def update_json_database(listing_data: dict) -> bool:
             database = json.load(f)
         
         # Create new entry with all listing data
-
+        # update according to the new fields in the details dictionary
         new_entry = {
             'date_scraped': listing_data.get('date_scraped', datetime.now().strftime('%Y-%m-%d')),
             'price': listing_data.get('price'),
@@ -330,7 +376,23 @@ def update_json_database(listing_data: dict) -> bool:
             'start_date': listing_data.get('start_date'),
             'num_images': listing_data.get('num_images', 0),
             'has_watermark': listing_data.get('has_watermark', False),
-            'description': listing_data.get('description')
+            'description': listing_data.get('description'),
+            'housing_type': listing_data.get('housing_type'),
+            'rent_period': listing_data.get('rent_period'),
+            'amenities': listing_data.get('amenities', []),
+            'furnished': listing_data.get('furnished', False),
+            'parking': listing_data.get('parking')
+            # 'status': listing_data.get('status', 'active'),
+            # 'last_updated': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+            # 'views': listing_data.get('views', 0),
+            # 'saved_count': listing_data.get('saved_count', 0),
+            # 'contact_info': listing_data.get('contact_info'),
+            # 'square_footage': listing_data.get('square_footage'),
+            # 'pets_allowed': listing_data.get('pets_allowed', False),
+            # 'utilities_included': listing_data.get('utilities_included', False),
+            # 'lease_length': listing_data.get('lease_length'),
+            # 'move_in_fee': listing_data.get('move_in_fee'),
+            # 'security_deposit': listing_data.get('security_deposit')
         }
         
         # Add new entry to database
