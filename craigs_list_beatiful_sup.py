@@ -4,7 +4,6 @@ from typing import Optional
 from csv_extraction import update_listings_csv
 
 
-
 def build_craigslist_url(
     city: str = 'vancouver',
     category: str = 'sub',  # sub = sublets/temporary
@@ -96,27 +95,23 @@ def scrape_craigslist(
         print("⚠️ Connection error:", e)
         return valid_links
 
-# Example usage:
+
 if __name__ == "__main__":
-    # # Example 1: Basic search for sublets in Vancouver under $1200
-    # results = scrape_craigslist(
-    #     city='vancouver',
-    #     max_price=1200,
-    #     query='may sublet'
-    # )
     
     # Example 2: Search for apartments within 5 miles of a specific postal code
     results = scrape_craigslist(
         city='Vancouver',
         category='apartments',  # apartments # sub
         min_price= 1600,
-        max_price=2400,
+        max_price=2200,
         postal_code='V6H3E9',
-        search_distance=3
+        search_distance=5
     )
 
+    #To Do: Ask for prefrence of the user and add to later search in the text
     for link in results:
         update_listings_csv(link)
         print(link)
 
+    # write an agent 
 

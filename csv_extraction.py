@@ -12,6 +12,21 @@ import re
 import glob
 import json
 
+# from smolagents_functions import prompt
+
+
+from smolagents import CodeAgent, LiteLLMModel
+
+# Create a basic model wrapper (e.g., Claude or GPT-4)
+model = LiteLLMModel(model_id="anthropic/claude-3-7-sonnet-latest")
+
+# Create the agent (no tools needed)
+agent = CodeAgent(
+    tools=[],  # No custom tools
+    model=model,
+    add_base_tools=True,  # Optional: gives access to built-in functions
+)
+
 def get_current_csv_path() -> str:
     """
     Determine the appropriate CSV file path based on date and entry count rules.
@@ -112,27 +127,24 @@ def extract_listing_details(url: str) -> Dict[str, any]:
             'link': url,
             'price': None,
             'rooms': None,
-            'separate_bath': False,
-            'separate_kitchen': False,
+            'separate_bath': None,
+            'separate_kitchen': None,
             'neighborhood': None,
             'start_date': None,
             'num_images': 0,
-            'has_watermark': False,
             'description': None,
             'housing_type': None,  # New field
             'rent_period': None,   # New field
             'amenities': [],       # New field
             'furnished': False,    # New field
-            'parking': None        # New field
+            'parking': None,        # New field
+            'gym' : None, 
+            'dishwasher': None, 
+            'utilities': None
         }
         
-        # Find h1 tag and get the next p tag
-        h1_tag = soup.find('h1', class_=False)
-        if h1_tag:
-            # Find the next p tag after h1
-            next_p = h1_tag.find_next('p')
-            if next_p:
-                details['description'] = next_p.text.strip()
+        
+        
         
         # Extract price
         price_elem = soup.find('span', {'class': 'price'})
@@ -152,13 +164,14 @@ def extract_listing_details(url: str) -> Dict[str, any]:
             spans = attrgroup.find_all('span', class_=['attr', 'valu'])
 
             for span in spans:
-                print(span)
                 text = span.text.strip().lower()
                 if 'br' in text:
                     try:
                         details['rooms'] = int(text.split('br')[0].strip())
                     except:
                         pass
+                elif 'utilities' in text:
+                    details['utilities'] = True
                 elif 'ba' in text:
                     details['separate_bath'] = True
                 elif 'private bath' in text:
@@ -235,12 +248,25 @@ def extract_listing_details(url: str) -> Dict[str, any]:
                             break
                         except ValueError:
                             continue
-        
+
+        # Find h1 tag and get the next p tag
+        h1_tag = soup.find('h1', class_=False)
+        if h1_tag:
+            # Find the next p tag after h1
+            # next_p = h1_tag.find_next('p')
+            post_body = soup.find("section", {"id": "postingbody"})
+            if post_body:
+                details['description'] = post_body.get_text(strip=True, separator="\n")
+
+            # if next_p:
+            #     details['description'] = next_p.text.strip()
+
         return details
     
     except Exception as e:
         print(f"Error processing listing {url}: {e}")
         return None
+
 
 def update_listings_csv(listing_url: str):
     """
@@ -253,7 +279,45 @@ def update_listings_csv(listing_url: str):
         return
     
     # Extract details from the listing
-    details = extract_listing_details(listing_url)
+    old_details = extract_listing_details(listing_url)
+
+    #add an agent that verified the cross checks the details
+
+    prompt = f"""
+        You are given a dictionary called `details` that describes an apartment listing, along with a free-text listing `description`.
+
+        Your task is to examine the `description` and update the fields in `details` to make them accurate.
+
+        Instructions:
+        1. For each key in the `details` dictionary:
+        - If the value is `None`, try to infer the correct value from the `description`.
+        - If the value is **not `None`**, check whether the value is correct based on the `description`.
+            - If it's correct, keep it.
+            - If it's incorrect, replace it with the correct value.
+            - If the description doesn't clearly support or contradict the value, leave it unchanged.
+
+        Here are the field definitions:
+        - price: Monthly rent (CAD), e.g., 1900
+        - rooms: Number of bedrooms (integer)
+        - separate_bath: True if the unit has a private bathroom, False otherwise
+        - separate_kitchen: True if there is a private kitchen, False otherwise
+        - neighborhood: Area or location mentioned, e.g., Kitsilano, Mount Pleasant (If exact address is given then don't update )
+        - start_date: Move-in date if mentioned
+        - housing_type: e.g., apartment, studio, basement
+        - rent_period: e.g., monthly, yearly, sublet, 6months, 4 months .., lease
+        - parking: e.g., included, street, none
+        - gym: True if gym is available
+        - dishwasher: True if unit includes a dishwasher
+        - utilities: e.g. Included, excluded: If yes, which ones: hydro, heat, hot water, internet, list all that are included 
+
+        Return the updated `details` dictionary with corrected or inferred values.
+
+        Here is the input dictionary:
+        {old_details}
+        """
+
+    details = agent.run(prompt)
+    print(details)
 
     if not details:
         print(f"Could not process listing: {listing_url}")
@@ -381,18 +445,10 @@ def update_json_database(listing_data: dict) -> bool:
             'rent_period': listing_data.get('rent_period'),
             'amenities': listing_data.get('amenities', []),
             'furnished': listing_data.get('furnished', False),
-            'parking': listing_data.get('parking')
-            # 'status': listing_data.get('status', 'active'),
-            # 'last_updated': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-            # 'views': listing_data.get('views', 0),
-            # 'saved_count': listing_data.get('saved_count', 0),
-            # 'contact_info': listing_data.get('contact_info'),
-            # 'square_footage': listing_data.get('square_footage'),
-            # 'pets_allowed': listing_data.get('pets_allowed', False),
-            # 'utilities_included': listing_data.get('utilities_included', False),
-            # 'lease_length': listing_data.get('lease_length'),
-            # 'move_in_fee': listing_data.get('move_in_fee'),
-            # 'security_deposit': listing_data.get('security_deposit')
+            'parking': listing_data.get('parking'), 
+            'gym' : listing_data.get('gym'), #
+            'dishwasher': listing_data.get('dishwasher'),
+            'utilities': listing_data.get('utilities')
         }
         
         # Add new entry to database
@@ -457,4 +513,5 @@ if __name__ == "__main__":
     # Get statistics about both databases
     get_csv_stats()
     get_json_stats()
+
 
