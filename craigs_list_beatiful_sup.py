@@ -3,6 +3,8 @@ from bs4 import BeautifulSoup
 from typing import Optional
 from csv_extraction import update_listings_csv
 
+
+
 def build_craigslist_url(
     city: str = 'vancouver',
     category: str = 'sub',  # sub = sublets/temporary
@@ -106,7 +108,8 @@ if __name__ == "__main__":
     # Example 2: Search for apartments within 5 miles of a specific postal code
     results = scrape_craigslist(
         city='Vancouver',
-        category='sub',  # apartments
+        category='apartments',  # apartments # sub
+        min_price= 1600,
         max_price=2400,
         postal_code='V6H3E9',
         search_distance=3
@@ -115,3 +118,5 @@ if __name__ == "__main__":
     for link in results:
         update_listings_csv(link)
         print(link)
+
+
